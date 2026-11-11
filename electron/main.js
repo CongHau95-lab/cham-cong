@@ -20,10 +20,11 @@ app.whenReady().then(() => {
   session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
     const h = {};
     for (const k of Object.keys(details.responseHeaders || {})) if (!/^access-control-/i.test(k)) h[k] = details.responseHeaders[k];
-    if (/^https:\/\/([a-z0-9-]+\.)?googleapis\.com\//.test(details.url)) {
+    // googleapis.com: Firestore + đăng nhập; firebasedatabase.app / firebaseio.com: kênh báo thay đổi tức thì
+    if (/^https:\/\/([a-z0-9.-]+\.)?(googleapis\.com|firebasedatabase\.app|firebaseio\.com)\//.test(details.url)) {
       h['Access-Control-Allow-Origin'] = ['*'];
       h['Access-Control-Allow-Headers'] = ['Content-Type, Authorization'];
-      h['Access-Control-Allow-Methods'] = ['GET, POST, PATCH, OPTIONS'];
+      h['Access-Control-Allow-Methods'] = ['GET, POST, PATCH, PUT, OPTIONS'];
     }
     cb({ responseHeaders: h });
   });
