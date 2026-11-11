@@ -1,0 +1,7 @@
+{
+  "appId": "vn.central.chamcong",
+  "appName": "Chấm công",
+  "webDir": "web",
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false }
+}

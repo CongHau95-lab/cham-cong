@@ -1,0 +1,35 @@
+{
+  "name": "cham-cong-diamond-sky",
+  "productName": "Chấm công Diamond Sky",
+  "version": "1.0.0",
+  "description": "Phần mềm chấm công Diamond Sky - Central",
+  "author": "Nguyễn Công Hậu",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "electron": "electron .",
+    "dist:win": "electron-builder --win --x64 --publish never",
+    "dist:mac": "electron-builder --mac --publish never"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0",
+    "@capacitor/filesystem": "^6.0.0",
+    "@capacitor/ios": "^6.1.0",
+    "@capacitor/share": "^6.0.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "vn.central.chamcong",
+    "productName": "Chấm công Diamond Sky",
+    "files": ["web/**", "electron/**", "package.json"],
+    "icon": "web/icon-512.png",
+    "win": { "target": "nsis" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false },
+    "mac": { "target": "dmg", "category": "public.app-category.business" }
+  }
+}

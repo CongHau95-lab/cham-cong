@@ -1,0 +1,86 @@
+rules_version = '2';
+
+// Quy tắc truy cập dữ liệu "Chấm công Diamond Sky".
+// Dán toàn bộ nội dung này vào Firebase Console > Firestore Database > Rules > Publish.
+//
+// Mức quyền (lưu ở users/{uid}.role):
+//   (không đăng nhập)  khách: chỉ xem dữ liệu công khai, KHÔNG thấy thông tin cá nhân
+//   pending            đã đăng ký, chờ chủ duyệt: như khách
+//   viewer  (Xem)      xem đầy đủ, kể cả thông tin cá nhân, lương, chuyên cần; không sửa
+//   commenter (Nhận xét) như Xem + gửi đề xuất, góp ý, nhận xét
+//   editor (Chỉnh sửa) như Nhận xét + chấm công, sửa dữ liệu, đọc mọi góp ý
+//   owner (Chủ)        như Chỉnh sửa + cấp quyền, chuyển quyền chủ
+//
+// Dữ liệu cá nhân (CCCD, ngày sinh, hộ khẩu, SĐT, ngân hàng, số tài khoản, đơn giá, lý do nghỉ...)
+// nằm riêng ở workers_private và config_private nên khách không đọc được ở phía máy chủ.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function hasUser() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function role() { return hasUser() ? userDoc().data.role : 'none'; }
+    function isOwner() { return role() == 'owner'; }
+    function isEditor() { return role() in ['editor', 'owner']; }
+    function isCommenter() { return role() in ['commenter', 'editor', 'owner']; }
+    function seesPrivate() { return role() in ['viewer', 'commenter', 'editor', 'owner']; }
+
+    // ---- dữ liệu công khai: ai có app cũng xem được, chỉ Chỉnh sửa trở lên mới ghi ----
+    match /units/{id}    { allow read: if true; allow write: if isEditor(); }
+    match /workers/{id}  { allow read: if true; allow write: if isEditor(); }
+    match /days/{id}     { allow read: if true; allow write: if isEditor(); }
+    match /config/{id}   { allow read: if true; allow write: if isEditor(); }
+    match /meta/{id}     { allow read: if true; allow write: if isEditor(); }
+
+    // ---- dữ liệu riêng: chỉ tài khoản đã được duyệt từ mức Xem trở lên ----
+    match /workers_private/{id} { allow read: if seesPrivate(); allow write: if isEditor(); }
+    match /config_private/{id}  { allow read: if seesPrivate(); allow write: if isEditor(); }
+
+    // ---- tài khoản ----
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isOwner());
+      allow list: if isOwner();
+
+      // tự tạo hồ sơ của mình, luôn ở mức "pending"; không tự cấp quyền được
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['email', 'name', 'role', 'verified', 'createdAt'])
+        && request.resource.data.role == 'pending'
+        && request.resource.data.verified == false
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60;
+
+      allow update: if
+        // Chủ đổi quyền người khác (và tự rời quyền Chủ); chỉ trao quyền Chủ cho email đã xác minh
+        (isOwner()
+          && request.resource.data.keys().hasOnly(['email', 'name', 'role', 'verified', 'createdAt'])
+          && request.resource.data.role in ['pending', 'viewer', 'commenter', 'editor', 'owner']
+          && (request.resource.data.role != 'owner' || resource.data.role == 'owner' || resource.data.verified == true))
+        ||
+        // người dùng chỉ sửa được tên và cờ "đã xác minh email" (cờ này chỉ lên true khi Firebase xác nhận email)
+        (request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'verified'])
+          && request.resource.data.name is string && request.resource.data.name.size() <= 60
+          && (request.resource.data.verified == resource.data.verified
+              || (request.resource.data.verified == true && request.auth.token.email_verified == true)));
+
+      allow delete: if isOwner();
+    }
+
+    // ---- người kế nhiệm quyền Chủ: chỉ Chủ đọc và ghi ----
+    match /admin/{id} { allow read, write: if isOwner(); }
+
+    // ---- góp ý, đề xuất, nhận xét ----
+    match /suggestions/{id} {
+      allow read: if isEditor() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isCommenter()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'open'
+        && request.resource.data.text is string && request.resource.data.text.size() <= 1500
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'email', 'kind', 'date', 'text', 'status', 'reply', 'createdAt', '_ts']);
+      allow update: if isEditor()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reply', 'repliedBy', 'repliedAt', '_ts']);
+      allow delete: if isOwner();
+    }
+  }
+}
