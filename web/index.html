@@ -393,6 +393,9 @@ body.painting .cell:hover { outline: 3px solid var(--pop); outline-offset: 1px; 
 .credit { max-width: 1280px; margin: 0 auto; padding: 14px max(16px, env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); text-align: right; font-size: 12px; color: var(--muted, #6b7280); }
 .credit b { color: var(--ink, #1f2a44); font-weight: 600; }
 .credit a { color: inherit; text-decoration: none; font-weight: 600; }
+.credit .live { font-weight: 600; white-space: nowrap; }
+.credit .live.on { color: #15803d; }
+.credit .live.off { color: var(--muted, #6b7280); }
 @media print { .credit { display: none; } }
 
 /* ---- chế độ app: tài khoản, phân quyền, góp ý ---- */
@@ -1034,6 +1037,7 @@ function makeFb(cfg) {
   const TOKH = cfg.tokenHost || 'https://securetoken.googleapis.com';
   const LS_AUTH = 'chamcong.fbauth', LS_CACHE = 'chamcong.fbcache';
   const POLL_MS = cfg.pollMs || 15000;
+  const RT = String(cfg.databaseURL || '').replace(/\/+$/, '');   // Realtime Database: chỉ dùng làm kênh báo "có thay đổi"
   const PRIV = new Set(['workers_private', 'config_private']);
   let sess = null, me = null, role = 'guest';
 
@@ -1166,6 +1170,7 @@ function makeFb(cfg) {
   async function commit(writes, bump = true) {
     const all = bump ? writes.concat([{ update: { name: dn('meta/rev'), fields: { n: fsEnc(Date.now()) } }, updateMask: { fieldPaths: ['n'] }, updateTransforms: [REQ] }]) : writes;
     await http('POST', `${FS}:commit`, { writes: all });
+    if (bump) pushRev();
   }
   const parseDoc = j => {
     const f = j.fields || {}, data = {};
@@ -1313,13 +1318,77 @@ function makeFb(cfg) {
 
   /* ---- vòng hỏi cập nhật ---- */
   let timer = 0, busy = false, down = false, lastRev = null, started = false, sugAt = 0, usrAt = 0, pend = 0, openN = -1;
-  function schedule(first) { clearTimeout(timer); if (typeof document !== 'undefined' && document.hidden) return; timer = setTimeout(tick, first ? 1500 : POLL_MS); }
+  // đã nối được kênh đẩy thì vòng hỏi chỉ còn là lưới an toàn (30 giây một lần)
+  function schedule(first) { clearTimeout(timer); if (typeof document !== 'undefined' && document.hidden) return; timer = setTimeout(tick, first ? 1500 : (streamOk ? Math.max(POLL_MS, 30000) : POLL_MS)); }
   function start() {
     if (started) return; started = true;
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
-    window.addEventListener('online', () => tick());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) closeStream(); else { tick(); openStream(); } });
+    window.addEventListener('online', () => { tick(); openStream(); });
     schedule(true);
+    openStream();
   }
+
+  /* ---- kênh đẩy tức thì ----
+     Realtime Database chỉ giữ một con số `rev`. Sau mỗi lần ghi Firestore, máy ghi tăng số này; mọi máy đang mở
+     nghe luồng SSE (/rev.json) nên biết ngay và tải phần thay đổi, không cần hỏi liên tục. Không nối được thì
+     vòng hỏi theo pollMs vẫn chạy như cũ. Dữ liệu thật không đi qua kênh này. */
+  let stream = null, streamOk = false, streamRetry = 0, backoff = 2000, lastPush, lastOwn = 0, lastKick = 0, kickT = 0, pendingKick = false;
+  const liveFns = new Set();
+  const fireLive = () => liveFns.forEach(f => { try { f(streamOk); } catch (e) { /* ignore */ } });
+  async function pushRev() {
+    if (!RT || !sess) return;
+    try {
+      await ensureToken();
+      const v = Date.now(); lastOwn = v;
+      await fetch(`${RT}/rev.json?auth=${encodeURIComponent(sess.idToken)}`, { method: 'PUT', body: JSON.stringify(v) });
+    } catch (e) { /* kênh đẩy chỉ là phần thêm: lỗi thì máy khác vẫn nhận qua vòng hỏi */ }
+  }
+  function kick() {
+    if (kickT) return;
+    kickT = setTimeout(() => { kickT = 0; lastKick = Date.now(); if (busy) pendingKick = true; else tick(); }, Math.max(0, 1200 - (Date.now() - lastKick)));   // gộp các tín hiệu dồn dập
+  }
+  function onPush(ev, raw) {
+    if (ev !== 'put' && ev !== 'patch') return;
+    let d; try { d = JSON.parse(raw); } catch (e) { return; }
+    if (!d || d.path !== '/') return;
+    const v = d.data;
+    if (lastPush === undefined) { lastPush = v; kick(); return; }   // vừa nối: kiểm tra bù phần có thể đã lỡ
+    if (v === lastPush) return;
+    lastPush = v;
+    if (v !== lastOwn) kick();                                        // số do chính máy này ghi thì bỏ qua
+  }
+  async function openStream() {
+    if (!RT || stream || typeof document === 'undefined' || document.hidden || typeof AbortController === 'undefined' || typeof TextDecoder === 'undefined') return;
+    const ctl = new AbortController(); stream = ctl; lastPush = undefined;
+    let seen = Date.now();
+    const dog = setInterval(() => { if (Date.now() - seen > 70000) ctl.abort(); }, 10000);   // im lặng quá 70 giây (máy chủ gửi nhịp mỗi ~30 giây) thì nối lại
+    try {
+      const res = await fetch(`${RT}/rev.json`, { headers: { Accept: 'text/event-stream' }, cache: 'no-store', signal: ctl.signal });
+      if (!res.ok || !res.body) throw new Error('stream ' + res.status);
+      const rd = res.body.getReader(), dec = new TextDecoder();
+      let buf = '', ev = '';
+      for (;;) {
+        const { value, done } = await rd.read();
+        if (done) break;
+        seen = Date.now();
+        if (!streamOk) { streamOk = true; backoff = 2000; fireLive(); schedule(); }
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i).replace(/\r$/, ''); buf = buf.slice(i + 1);
+          if (line.startsWith('event:')) ev = line.slice(6).trim();
+          else if (line.startsWith('data:')) onPush(ev, line.slice(5).trim());
+          else if (!line) ev = '';
+        }
+      }
+    } catch (e) { /* rớt mạng hoặc bị ngắt: nối lại bên dưới */ }
+    clearInterval(dog);
+    stream = null;
+    if (streamOk) { streamOk = false; fireLive(); }
+    schedule();
+    if (!document.hidden) { clearTimeout(streamRetry); streamRetry = setTimeout(openStream, backoff); backoff = Math.min(backoff * 2, 30000); }
+  }
+  function closeStream() { clearTimeout(streamRetry); if (stream) stream.abort(); }
   async function getRev() {
     try { const j = await http('GET', `${FS}/meta/rev`); return j.updateTime || ''; }
     catch (e) { if (e.code === 'not-found') return ''; throw e; }
@@ -1344,7 +1413,7 @@ function makeFb(cfg) {
       }
     } catch (e) {
       if (!down) { down = true; subs.forEach(l => { if (l.err) l.err(e); }); }
-    } finally { busy = false; schedule(); }
+    } finally { busy = false; if (pendingKick) { pendingKick = false; kick(); } schedule(); }
   }
 
   /* ================= ghi dữ liệu ================= */
@@ -1486,6 +1555,8 @@ function makeFb(cfg) {
     refreshNow: () => tick(true),
     get me() { return me; }, get role() { return role; }, get pending() { return pend; }, canPriv,
     onAuth: f => { authFns.add(f); return () => authFns.delete(f); },
+    onLive: f => { liveFns.add(f); return () => liveFns.delete(f); },
+    live: () => streamOk,
     sug: { load: sugLoad, list: sugList, add: sugAdd, update: sugUpdate, open: sugOpen },
     users: { list: usersList, setRole: usersSetRole, heir: heirGet, setHeir: heirSet, transfer: transferOwner }
   };
@@ -1508,9 +1579,19 @@ async function appBoot() {
   if (!cfg || !cfg.apiKey || !cfg.projectId || /DIEN-|YOUR_|^\.\.\./i.test(cfg.apiKey + cfg.projectId)) { S.conn = 'setup'; render(); return false; }
   S.fb = makeFb(cfg); S.db = S.fb.db;
   S.fb.onAuth(applyRole);
+  S.fb.onLive(renderLive);
   await S.fb.init();
   applyRole();
   return true;
+}
+
+/* chấm nhỏ ở chân trang: xanh = đang nhận thay đổi tức thì; xám = cập nhật định kỳ (dự phòng) */
+function renderLive() {
+  const el = $('#live'); if (!el || !S.fb) return;
+  const on = S.fb.live();
+  el.className = 'live ' + (on ? 'on' : 'off');
+  el.title = on ? 'Dữ liệu từ máy khác hiện ra ngay' : 'Đang cập nhật định kỳ vài giây một lần';
+  el.textContent = on ? '● Trực tiếp' : '○ Định kỳ';
 }
 
 function setupNotice() {
@@ -3559,7 +3640,8 @@ function render() {
 function renderCredit() {
   const c = $('#credit'); if (!c) return;
   const tel = String(CREDIT.phone || '').replace(/[^\d+]/g, '');
-  c.innerHTML = `Phần mềm do <b>${esc(CREDIT.name)}</b> tạo` + (CREDIT.phone ? ` · ĐT: <a href="tel:${esc(tel)}">${esc(CREDIT.phone)}</a>` : '');
+  c.innerHTML = `Phần mềm do <b>${esc(CREDIT.name)}</b> tạo` + (CREDIT.phone ? ` · ĐT: <a href="tel:${esc(tel)}">${esc(CREDIT.phone)}</a>` : '') + (MODE === 'app' ? ' · <span id="live" class="live off"></span>' : '');
+  if (MODE === 'app' && typeof renderLive === 'function') renderLive();
 }
 function fixBar() {
   const b = $('#bar');
