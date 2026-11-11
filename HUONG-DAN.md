@@ -5,7 +5,7 @@ Phần mềm do **Nguyễn Công Hậu** tạo · ĐT 0964 318 104
 Bộ này gồm 1 giao diện web duy nhất (thư mục `web/`) dùng chung một kho dữ liệu trên Firebase.
 Từ đó đóng gói thành: web (iPhone, Android, máy tính), file `.apk` (Android), bộ cài `.exe` (Windows), `.dmg` (Mac).
 
-> **Trạng thái kiểm thử.** Phần web (đăng nhập, phân quyền, ẩn dữ liệu cá nhân, đồng bộ, góp ý, sao lưu, mở khi mất mạng) đã chạy thử đủ trên máy chủ Firebase giả lập. **Chưa thử được trên Firebase thật**: file `firestore.rules`, và các bước tạo `.apk` / `.exe` / `.dmg` bằng GitHub Actions. Làm theo mục 6 để tự kiểm tra rules trước khi dùng thật.
+> **Trạng thái kiểm thử.** Phần web (đăng nhập, phân quyền, ẩn dữ liệu cá nhân, đồng bộ, góp ý, sao lưu, mở khi mất mạng) đã chạy thử đủ trên máy chủ Firebase giả lập. **Chưa thử được trên Firebase thật**: file `firestore.rules`, kênh đồng bộ tức thì (mục 8), và các bước tạo `.apk` / `.exe` / `.dmg` bằng GitHub Actions. Làm theo mục 6 để tự kiểm tra rules trước khi dùng thật.
 
 ---
 
@@ -98,3 +98,20 @@ Nếu một dòng khác kết quả này, đừng dùng thật mà báo lại đ
 - **Quên mật khẩu**: màn Đăng nhập → *Quên mật khẩu?*.
 - **Chủ mất quyền truy cập**: Firebase Console → Firestore → users → sửa `role` của tài khoản cần làm Chủ thành `owner` (người dùng này phải xác minh email).
 - **Không vào được khi mất mạng**: app mở lại được và hiện dữ liệu công khai lần gần nhất, nhưng chưa ghi được cho đến khi có mạng. Thông tin cá nhân không lưu trên máy nên không hiện khi mất mạng.
+
+---
+
+## 8. Đồng bộ tức thì giữa web và app (Realtime Database)
+
+Mặc định app hỏi máy chủ vài giây một lần (`pollMs`). Để máy này sửa là máy kia thấy trong khoảng 1 giây, bật thêm một kênh báo tin rất nhẹ:
+
+1. Firebase Console → **Build → Realtime Database → Create Database** → vị trí `asia-southeast1` → **Start in locked mode** → Enable.
+2. Tab **Rules** → xóa nội dung cũ → dán file `database.rules.json` → **Publish**.
+3. Chép địa chỉ ở đầu tab Data (dạng `https://TEN-DU-AN-default-rtdb.asia-southeast1.firebasedatabase.app`), dán vào `web/firebase-config.js` ở dòng `databaseURL`.
+
+Kênh này chỉ chứa **một con số** (thời điểm sửa gần nhất), không chứa dữ liệu chấm công hay thông tin cá nhân. Khi con số đổi, app tự tải phần dữ liệu mới từ Firestore, vẫn theo đúng phân quyền.
+
+Chân trang hiện **● Trực tiếp** khi kênh đang nối, **○ Định kỳ** khi chưa nối được (khi đó app tự quay về hỏi theo chu kỳ, không mất dữ liệu). Chạy nền thì app tạm ngắt kênh, mở lại là nối lại và bù phần đã lỡ.
+
+Lưu ý: ai đã đăng nhập và xác minh email đều ghi được con số này. Họ chỉ có thể làm các máy tải lại dữ liệu nhiều hơn, không đọc hay sửa được dữ liệu.
+
