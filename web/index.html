@@ -362,7 +362,8 @@ body.painting .cell:hover { outline: 3px solid var(--pop); outline-offset: 1px; 
 .lt .empty { text-align: center; color: var(--muted); padding: 14px; }
 
 /* ---- chuyên cần & kỷ luật ---- */
-.vn { color: var(--bad); font-weight: 700; } .ln { color: var(--warn); font-weight: 600; }
+.vn { color: var(--bad); font-weight: 700; } .ln { color: var(--warn); font-weight: 600; } .en { color: var(--ok); font-weight: 600; }
+.att small.exn { color: var(--ok); }
 .discbar { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; margin: 4px 0 6px; padding: 8px 12px; border-radius: 10px; background: var(--badbg); color: var(--bad); border: 1.5px solid var(--bad); font-size: 13px; }
 .dbadge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .dbadge.warn { background: var(--warnbg); color: var(--warn); } .dbadge.out { background: var(--bad); color: #fff; } .dbadge.no { background: var(--surface2); color: var(--muted); border: 1px solid var(--line); }
@@ -487,6 +488,7 @@ const DEFAULT_SETTINGS = {
   attMax: 2,                                            // số lần vi phạm (xin nghỉ / vắng không phép) thì mời khỏi dự án vĩnh viễn
   attKwViol: 'xin nghỉ, vắng không phép, nghỉ không phép, không xin phép, tự ý nghỉ',   // cụm từ trong ghi chú tính là vi phạm
   attKwLate: 'đi trễ, đến trễ, vào trễ, đi muộn, đến muộn, vào muộn, trễ giờ',            // cụm từ trong ghi chú tính là đi trễ
+  attKwExempt: 'khám sức khỏe, khám sk, làm hồ sơ, làm giấy tờ, làm thủ tục, lý do chính đáng, nghỉ chính đáng, vắng chính đáng',   // lý do chính đáng: buổi nghỉ không bị trừ điểm đi làm đủ ngày (nghỉ ốm, vắng không phép, mọi lý do khác vẫn trừ)
   attMerge: true,                                       // nghỉ nhiều ngày liên tiếp chỉ tính 1 lần vi phạm
   rateWorker: 400000, rateForeman: 550000, mealAllow: 50000,   // đơn giá/công: công nhân (thợ, phụ) 400.000đ, tổ trưởng 550.000đ; phụ cấp cơm trưa 50.000đ/ngày đủ ca (nửa ngày chia nửa, tăng ca không có)
   bankBranch: 'Sài Gòn', bankProv: 'HCM',               // chi nhánh / tỉnh thành ngân hàng mặc định (từng người có thể khác)
@@ -3184,6 +3186,21 @@ const kwList = s => {
 const hasKw = (note, kws) => { if (!note || !kws.length) return false; const t = ' ' + fold(note) + ' '; return kws.some(k => t.includes(' ' + k + ' ')); };
 const isViolNote = n => hasKw(n, kwList(S.settings.attKwViol));
 const isLateNote = n => hasKw(n, kwList(S.settings.attKwLate));
+/** nghỉ có lý do chính đáng (khám sức khỏe, làm hồ sơ...): không bị trừ điểm đi làm đủ ngày.
+ *  Luôn bị trừ: vắng không phép, nghỉ ốm, và mọi lý do không nằm trong danh sách. Cụm "không/chưa + từ khóa" (vd "không có lý do chính đáng") không được miễn. */
+const NO_EXEMPT = ['vang khong phep', 'nghi khong phep', 'khong xin phep', 'khong phep', 'tu y nghi', 'tu y', 'om', 'sot', 'bi om'];
+function isExemptNote(n) {
+  if (!n || hasKw(n, NO_EXEMPT)) return false;
+  const t = ' ' + fold(n) + ' ';
+  return kwList(S.settings.attKwExempt).some(k => {
+    const key = ' ' + k + ' ';
+    for (let i = t.indexOf(key); i >= 0; i = t.indexOf(key, i + 1)) {
+      const pre = t.slice(0, i + 1).trim().split(' ').slice(-2);
+      if (!pre.some(w => w === 'khong' || w === 'ko' || w === 'chua')) return true;
+    }
+    return false;
+  });
+}
 const maxViol = () => clamp(parseInt(S.settings.attMax, 10) || 2, 1, 5);
 
 const loadedDates = () => [...new Set([...Object.keys(S.days), ...Object.keys(S.overlay)])].filter(isDate).sort();
@@ -3243,21 +3260,21 @@ function attMonth(ym) {
   for (let d = 1; d <= last; d++) { const date = `${ym}-${pad(d)}`; otReq[d] = ws.some(w => rowInfo(getRow(date, w.id)).ot > 0); }
   const out = [];
   ws.forEach(w => {
-    let exp = 0, off = 0, late = 0, unrec = 0, req = 0, otN = 0, cong = 0;
-    const offList = [], lateList = [];
+    let exp = 0, off = 0, exempt = 0, late = 0, unrec = 0, req = 0, otN = 0, cong = 0;
+    const offList = [], exList = [], lateList = [];
     for (let d = 1; d <= last; d++) {
       const date = `${ym}-${pad(d)}`, r = getRow(date, w.id), i = rowInfo(r), act = workerActive(w, date);
       if (!act && i.empty && !r.n) continue;
       exp++; cong += i.cong;
       const x = (r.s === 'X' ? .5 : 0) + (r.c === 'X' ? .5 : 0);
-      if (x) { off += x; offList.push({ date, x, n: r.n }); }
+      if (x) { if (isExemptNote(r.n)) { exempt += x; exList.push({ date, x, n: r.n }); } else { off += x; offList.push({ date, x, n: r.n }); } }
       if (isLateNote(r.n)) { late++; lateList.push({ date, n: r.n }); }
       if (act && date < today && !i.complete) unrec++;
       if (i.cong > 0 && otReq[d]) { req++; if (i.ot > 0) otN++; }
     }
     if (!exp) return;
     const rate = req ? otN / req : null, s5 = attScore5(off), s6 = attScore6(late), s7 = attScore7(rate), total = Math.round((s5 + s6 + s7) * 10) / 10, pct = total / 30;
-    out.push({ w, exp, cong, off, offList, late, lateList, unrec, req, otN, rate, s5, s6, s7, total, pct, rating: attRating(pct) });
+    out.push({ w, exp, cong, off, offList, exempt, exList, late, lateList, unrec, req, otN, rate, s5, s6, s7, total, pct, rating: attRating(pct) });
   });
   return out;
 }
@@ -3364,7 +3381,7 @@ function buildAttXlsx(ym) {
   sh.merge(2, 1, 2, LC, st.projectFull || '', s.sub); sh.height(2, 20);
   heads.forEach((t, i) => sh.set(4, i + 1, t, { s: s.hdr })); sh.height(4, 62);
   rows.forEach((x, i) => {
-    const r = 5 + i, dc = discOf(x.w.id).count, note = [x.unrec ? `Chưa nhập đủ ${x.unrec} ngày` : '', x.offList.length ? 'Nghỉ: ' + x.offList.map(o => dmy(o.date).slice(0, 5) + (o.x < 1 ? ' (½)' : '')).join(', ') : '', x.lateList.length ? 'Trễ: ' + x.lateList.map(o => dmy(o.date).slice(0, 5)).join(', ') : ''].filter(Boolean).join(' · ');
+    const r = 5 + i, dc = discOf(x.w.id).count, note = [x.unrec ? `Chưa nhập đủ ${x.unrec} ngày` : '', x.offList.length ? 'Nghỉ: ' + x.offList.map(o => dmy(o.date).slice(0, 5) + (o.x < 1 ? ' (½)' : '')).join(', ') : '', x.exList.length ? 'Miễn trừ (lý do chính đáng): ' + x.exList.map(o => dmy(o.date).slice(0, 5) + (o.x < 1 ? ' (½)' : '')).join(', ') : '', x.lateList.length ? 'Trễ: ' + x.lateList.map(o => dmy(o.date).slice(0, 5)).join(', ') : ''].filter(Boolean).join(' · ');
     sh.set(r, 1, i + 1, { s: s.c }); sh.set(r, 2, x.w.name, { s: s.l }); sh.set(r, 3, exRole(x.w), { s: s.c }); sh.set(r, 4, x.w.team || '', { s: s.c });
     sh.set(r, 5, x.exp, { s: s.n }); sh.set(r, 6, x.off, { s: s.n });
     sh.set(r, 7, x.s5, { s: s.n, f: `MAX(0,MIN(10,10-2*F${r}))` });
@@ -3382,7 +3399,7 @@ function buildAttXlsx(ym) {
   const rn = 5 + rows.length + 1;
   sh.merge(rn, 1, rn + 5, LC, [
     'Cách tính (theo Phiếu đánh giá tay nghề, mục CHUYÊN CẦN 30 điểm):',
-    '- Đi làm đủ ngày: điểm = 10 − 2 × số ngày nghỉ trong tháng (nghỉ nửa ngày tính 0,5; từ 5 ngày trở lên 0 điểm).',
+    '- Đi làm đủ ngày: điểm = 10 − 2 × số ngày nghỉ trong tháng (nghỉ nửa ngày tính 0,5; từ 5 ngày trở lên 0 điểm). Chỉ buổi nghỉ có lý do chính đáng (khám sức khỏe, làm hồ sơ…) được miễn trừ, không tính vào số ngày nghỉ. Nghỉ ốm, vắng không phép và các lý do khác đều bị trừ.',
     '- Đúng giờ: điểm = 10 − 2 × số lần đi trễ (ghi chú có cụm từ đi trễ); từ 5 lần trở lên 0 điểm.',
     '- Tăng ca: tỷ lệ = số ngày có tăng ca ÷ số ngày yêu cầu tăng ca mà người đó có đi làm (ngày yêu cầu = ngày có ít nhất một người của team tăng ca). >90%: 9–10; >80%: 7–8; >60%: 5–6; >40%: 3–4; còn lại: 1–2. Tháng không có ngày yêu cầu tăng ca thì tính 10.',
     '- Xếp loại theo tỷ lệ trên 30 điểm: Xuất sắc ≥90%; Tốt 75–89%; Đạt 60–74%; Chưa đạt <60%.'
@@ -4056,7 +4073,7 @@ function rowHtml(w, date) {
   const r = getRow(date, w.id), i = rowInfo(r);
   const st = i.complete ? 'ok' : i.partial ? 'part' : 'none';
   const stTxt = i.complete ? 'Đã nhập đủ' : i.partial ? 'Mới nhập một buổi' : 'Chưa nhập';
-  const sub = [esc(posLabel(w)), r.n ? `<span class="${isViolNote(r.n) ? 'vn' : isLateNote(r.n) ? 'ln' : ''}">“${esc(r.n)}”${isViolNote(r.n) ? ' ⚠' : ''}</span>` : ''].filter(Boolean).join(' · ');
+  const sub = [esc(posLabel(w)), r.n ? `<span class="${isViolNote(r.n) ? 'vn' : isLateNote(r.n) ? 'ln' : (isExemptNote(r.n) && (r.s === 'X' || r.c === 'X')) ? 'en' : ''}">“${esc(r.n)}”${isViolNote(r.n) ? ' ⚠' : ''}</span>` : ''].filter(Boolean).join(' · ');
   const over = i.ot > S.settings.otCap;
   return `<div class="r st-${st}" data-wid="${esc(w.id)}">
     <button type="button" class="nm" data-act="name" data-wid="${esc(w.id)}" aria-label="${esc(w.name)}: ${stTxt}. Bấm để chọn cả ngày"><span class="dot" title="${stTxt}"></span><span class="nmt"><b>${esc(w.name)}</b><small>${sub}</small></span></button>
@@ -4697,7 +4714,7 @@ function viewAtt() {
   const trs = rows.map((x, i) => {
     const d = dmap[x.w.id];
     return `<tr><td class="stt">${i + 1}</td><td><b>${esc(x.w.name)}</b><small>${wsub(x.w)}</small>${x.unrec ? `<small class="warnx">Chưa nhập đủ ${x.unrec} ngày</small>` : ''}</td>
-      <td>${x.off ? fmt(x.off) : '–'}<small>${x.offList.map(o => dmy(o.date).slice(0, 5) + (o.x < 1 ? ' (½)' : '')).join(', ')}</small></td><td class="sc ${scCls(x.s5)}">${fmt(x.s5)}</td>
+      <td>${x.off ? fmt(x.off) : '–'}<small>${x.offList.map(o => dmy(o.date).slice(0, 5) + (o.x < 1 ? ' (½)' : '')).join(', ')}</small>${x.exList.length ? `<small class="exn">Miễn trừ: ${x.exList.map(o => dmy(o.date).slice(0, 5) + (o.x < 1 ? ' (½)' : '') + ' “' + esc(o.n) + '”').join(', ')}</small>` : ''}</td><td class="sc ${scCls(x.s5)}">${fmt(x.s5)}</td>
       <td>${x.late || '–'}<small>${x.lateList.map(o => dmy(o.date).slice(0, 5)).join(', ')}</small></td><td class="sc ${scCls(x.s6)}">${fmt(x.s6)}</td>
       <td>${x.req ? `${x.otN}/${x.req} ngày<small>${Math.round(x.rate * 100)}%</small>` : '<span class="muted">–</span>'}</td><td class="sc ${scCls(x.s7)}">${fmt(x.s7)}</td>
       <td class="tt"><b>${fmt(x.total)}</b>/30</td><td><span class="rtg ${ratCls(x.rating)}">${x.rating}</span><small>${Math.round(x.pct * 100)}%</small></td>
@@ -4711,6 +4728,7 @@ function viewAtt() {
     <div class="tscroll"><table class="lt att"><thead><tr><th>#</th><th>Họ tên</th><th>Nghỉ (ngày)</th><th>Điểm đi làm đủ ngày</th><th>Đi trễ (lần)</th><th>Điểm đúng giờ</th><th>Tăng ca</th><th>Điểm tăng ca</th><th>Tổng</th><th>Xếp loại</th><th>Vi phạm kỷ luật</th></tr></thead><tbody>${trs}</tbody></table></div>
     <details class="how"><summary>Cách tính điểm</summary><ul>
       <li><b>Đi làm đủ ngày:</b> 10 − 2 × số ngày nghỉ trong tháng (nghỉ nửa ngày tính 0,5). Nghỉ dưới 1 ngày: 9–10 điểm, dưới 2: 7–8, dưới 3: 5–6, dưới 4: 3–4, dưới 5: 1–2; từ 5 ngày trở lên: 0.</li>
+      <li><b>Miễn trừ:</b> buổi nghỉ có ghi chú lý do chính đáng (khám sức khỏe, làm hồ sơ… , đặt trong Cài đặt) không tính vào số ngày nghỉ. Nghỉ ốm, vắng không phép và mọi lý do khác vẫn bị trừ. Ghi chú có “ốm” hoặc “không phép” luôn bị trừ dù có thêm cụm từ chính đáng.</li>
       <li><b>Đúng giờ:</b> 10 − 2 × số lần đi trễ (ghi chú có cụm từ đi trễ, đặt trong Cài đặt). Từ 5 lần trở lên: 0.</li>
       <li><b>Tăng ca:</b> tỷ lệ = số ngày có tăng ca ÷ số ngày yêu cầu tăng ca mà người đó có đi làm (ngày yêu cầu = ngày có ít nhất một người trong team tăng ca). Trên 90%: 9–10, trên 80%: 7–8, trên 60%: 5–6, trên 40%: 3–4, còn lại: 1–2. Tháng không có ngày yêu cầu tăng ca thì tính 10.</li>
       <li><b>Xếp loại</b> theo tỷ lệ trên 30 điểm: Xuất sắc từ 90%, Tốt 75–89%, Đạt 60–74%, Chưa đạt dưới 60%.</li>
@@ -4900,6 +4918,7 @@ function viewSettings() {
       ${f('attMax', 'Số lần vi phạm thì mời khỏi dự án vĩnh viễn (1–5)', 'inputmode="numeric"')}
       <label class="chk"><input type="checkbox" id="st-attMerge" data-chg="setting" data-k="attMerge"${st.attMerge !== false ? ' checked' : ''}${ro ? ' disabled' : ''}> Nghỉ nhiều ngày liên tiếp tính là 1 lần vi phạm</label>
       <label class="wide">Cụm từ trong ghi chú tính là vi phạm (cách nhau bằng dấu phẩy; không phân biệt hoa thường và dấu)<textarea id="st-attKwViol" data-chg="setting" data-k="attKwViol" rows="2"${ro ? ' disabled' : ''}>${esc(st.attKwViol || '')}</textarea></label>
+      <label class="wide">Lý do chính đáng, được miễn trừ điểm Đi làm đủ ngày (ghi vào ghi chú ngày nghỉ; cách nhau bằng dấu phẩy). Nghỉ ốm và vắng không phép luôn bị trừ<textarea id="st-attKwExempt" data-chg="setting" data-k="attKwExempt" rows="2"${ro ? ' disabled' : ''}>${esc(st.attKwExempt || '')}</textarea></label>
       <label class="wide">Cụm từ trong ghi chú tính là đi trễ (dùng chấm điểm Đúng giờ)<textarea id="st-attKwLate" data-chg="setting" data-k="attKwLate" rows="2"${ro ? ' disabled' : ''}>${esc(st.attKwLate || '')}</textarea></label>
     </div></section>
   <section class="panel"><div class="ph"><h3>Mặc định khi chấm công</h3></div>
