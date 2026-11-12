@@ -428,6 +428,12 @@ body.painting .cell:hover { outline: 3px solid var(--pop); outline-offset: 1px; 
 .rolelist { list-style: none; margin: 0; padding: 10px 14px 14px; display: grid; gap: 8px; font-size: 13px; }
 .rolelist li { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .bklist { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
+/* lập danh sách tùy chọn */
+.plist .clh { display: none !important; }
+.clq { width: 100%; margin: 2px 0 8px; }
+.clchips { align-items: center; margin-bottom: 8px; }
+.clchips .tg small { opacity: .7; }
+.clcols { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 
 </style>
 </head>
@@ -1892,6 +1898,7 @@ const COLW = [10, 50, 13, 52, 22, 13, 13, 22, 22, 32, 28];
 const COLX = COLW.reduce((a, w) => { a.push(a[a.length - 1] + w); return a; }, [10]);
 const TAB_TOP = 59, HEAD_H = 11, BODY_TOP = TAB_TOP + HEAD_H, BODY_BOTTOM = 159;
 const ROW_H = 6.6, GRP_H = 5.8, SIG_TOP = 163, FOOT_Y = 204.5;
+const ROW_MIN = 5.9, GRP_MIN = 5.0;   // chiều cao tối thiểu khi phải ép dòng cho vừa trang (chống dòng mồ côi)
 
 function sheetToPages(sh, cfg) {
   const T = sh.tower;
@@ -1959,21 +1966,22 @@ function sheetToPages(sh, cfg) {
   const tick = (cx, cy) => P.push({ t: 'poly', pts: [[cx - 1.8, cy + 0.2], [cx - 0.6, cy + 1.6], [cx + 2, cy - 1.9]], lw: 0.6 });
   const slash = (k, y, h) => line(COLX[k] + 1.2, y + h - 1.2, COLX[k + 1] - 1.2, y + 1.2, 0.2);
 
-  function drawSegment(y, g, rows, cont) {
-    const job = (g.job || g.u.note || '').trim();
-    const jl = job ? wrapText(job, COLW[3] - 3.5, 9.5, 'r') : [];
+  const jobLines = g => g._jl || (g._jl = (() => { const job = (g.job || g.u.note || '').trim(); return job ? wrapText(job, COLW[3] - 3.5, 9.5, 'r') : []; })());
+
+  function drawSegment(y, g, rows, cont, rh0, gh) {
+    const jl = jobLines(g);
     const textH = jl.length * 4.3;
     const nOrd = rows.filter(r => !isForeman(r.w)).length, nF = rows.length - nOrd;   // foreman: ô công việc riêng ghi "Foreman"
-    const ordH = nOrd ? Math.max(nOrd * ROW_H, textH + 2) : 0, rhOrd = nOrd ? ordH / nOrd : 0;
-    const segH = ordH + nF * ROW_H;
+    const ordH = nOrd ? Math.max(nOrd * rh0, textH + 2) : 0, rhOrd = nOrd ? ordH / nOrd : 0;
+    const segH = ordH + nF * rh0;
     // group band
-    rect(10, y, 277, GRP_H, 0.2, 0.92);
-    line(10, y, 10, y + GRP_H, 0.35); line(287, y, 287, y + GRP_H, 0.35);
-    text(12, vmid(y, GRP_H, 9.5), upperVi(fullName(g.u)) + (cont ? '  (tiếp)' : ''), 9.5, 'b');
-    const y0 = y + GRP_H;
+    rect(10, y, 277, gh, 0.2, 0.92);
+    line(10, y, 10, y + gh, 0.35); line(287, y, 287, y + gh, 0.35);
+    text(12, vmid(y, gh, 9.5), upperVi(fullName(g.u)) + (cont ? '  (tiếp)' : ''), 9.5, 'b');
+    const y0 = y + gh;
     let cy = y0;
     rows.forEach((r, i) => {
-      const fr = isForeman(r.w), rh = fr ? ROW_H : rhOrd, ry = cy, last = i === rows.length - 1;
+      const fr = isForeman(r.w), rh = fr ? rh0 : rhOrd, ry = cy, last = i === rows.length - 1;
       cy += rh;
       verticals(ry, rh);
       hline(ry + rh, last, last ? 0.35 : 0.2);
@@ -1990,13 +1998,14 @@ function sheetToPages(sh, cfg) {
       [r.s, r.c].forEach((v, k) => { if (v) tick(COLX[5 + k] + COLW[5 + k] / 2, ry + rh / 2); else slash(5 + k, ry, rh); });
       [r.tr, r.t].forEach((v, k) => {
         if (!v) return slash(7 + k, ry, rh);
-        const cx = COLX[7 + k] + COLW[7 + k] / 2, oy = ry + (rh - ROW_H) / 2;      // 2 dòng: khung giờ (nhỏ) + số giờ
-        text(cx, oy + 2.65, `${v.a}–${v.b}`, 6.4, 'r', 'c');
-        text(cx, oy + 5.75, fmt(v.h), 8.8, 'b', 'c');
+        const cx = COLX[7 + k] + COLW[7 + k] / 2, B = Math.min(rh, ROW_H), oy = ry + (rh - B) / 2, f = B / ROW_H;      // 2 dòng: khung giờ (nhỏ) + số giờ; dòng bị ép thì co theo
+        text(cx, oy + 2.65 * f, `${v.a}–${v.b}`, 6.4, 'r', 'c');
+        text(cx, oy + 5.75 * f, fmt(v.h), 8.8, 'b', 'c');
       });
       if (r.n) {
-        const nl = wrapText(r.n, COLW[10] - 2, 8, 'r').slice(0, Math.max(1, Math.floor(rh / 3.2)));
-        nl.forEach((l, j) => text(COLX[10] + 1, ry + 3.1 + j * 3.2 + (rh - nl.length * 3.2) / 2 - 0.2, l, 8, 'r'));
+        const fs = rh >= 6.4 ? 8 : 7, ls = fs === 8 ? 3.2 : 2.75;              // dòng bị ép thấp thì ghi chú dùng chữ 7pt để vẫn đủ 2 dòng
+        const nl = wrapText(r.n, COLW[10] - 2, fs, 'r').slice(0, Math.max(1, Math.floor(rh / ls)));
+        nl.forEach((l, j) => text(COLX[10] + 1, ry + (rh - nl.length * ls) / 2 + 0.906 * ls + j * ls, l, fs, 'r'));
       }
     });
     // merged cells
@@ -2005,27 +2014,27 @@ function sheetToPages(sh, cfg) {
     return y0 + segH;
   }
 
-  function drawTotals(y, groups) {
+  function drawTotals(y, groups, H) {
     let sx = 0, cx = 0, trh = 0, th = 0, people = new Set();
     groups.forEach(g => g.rows.forEach(r => { people.add(r.w.id); if (r.s) sx++; if (r.c) cx++; trh += r.tr ? r.tr.h : 0; th += r.t ? r.t.h : 0; }));
-    rect(10, y, 277, ROW_H, 0.35, 0.96);
-    [5, 6, 7, 8, 9].forEach(k => line(COLX[k], y, COLX[k], y + ROW_H, 0.2));
-    text(12, vmid(y, ROW_H, 10), `Tổng cộng: ${people.size} người`, 10, 'b');
-    text(COLX[5] + COLW[5] / 2, vmid(y, ROW_H, 10), String(sx), 10, 'b', 'c');
-    text(COLX[6] + COLW[6] / 2, vmid(y, ROW_H, 10), String(cx), 10, 'b', 'c');
-    text(COLX[7] + COLW[7] / 2, vmid(y, ROW_H, 10), trh ? fmt(trh) : '', 10, 'b', 'c');
-    text(COLX[8] + COLW[8] / 2, vmid(y, ROW_H, 10), th ? fmt(th) : '', 10, 'b', 'c');
-    return y + ROW_H;
+    rect(10, y, 277, H, 0.35, 0.96);
+    [5, 6, 7, 8, 9].forEach(k => line(COLX[k], y, COLX[k], y + H, 0.2));
+    text(12, vmid(y, H, 10), `Tổng cộng: ${people.size} người`, 10, 'b');
+    text(COLX[5] + COLW[5] / 2, vmid(y, H, 10), String(sx), 10, 'b', 'c');
+    text(COLX[6] + COLW[6] / 2, vmid(y, H, 10), String(cx), 10, 'b', 'c');
+    text(COLX[7] + COLW[7] / 2, vmid(y, H, 10), trh ? fmt(trh) : '', 10, 'b', 'c');
+    text(COLX[8] + COLW[8] / 2, vmid(y, H, 10), th ? fmt(th) : '', 10, 'b', 'c');
+    return y + H;
   }
 
-  function drawBlank(y, n, label) {
+  function drawBlank(y, n, label, H) {
     for (let i = 0; i < n; i++) {
-      const ry = y + i * ROW_H;
-      verticals(ry, ROW_H);
-      hline(ry + ROW_H, i === n - 1, i === n - 1 ? 0.35 : 0.2);
-      if (i === 0 && label) text(COLX[1] + 1.5, vmid(ry, ROW_H, 9), label, 9, 'r');
+      const ry = y + i * H;
+      verticals(ry, H);
+      hline(ry + H, i === n - 1, i === n - 1 ? 0.35 : 0.2);
+      if (i === 0 && label) text(COLX[1] + 1.5, vmid(ry, H, 9), label, 9, 'r');
     }
-    return y + n * ROW_H;
+    return y + n * H;
   }
 
   function drawSignatures() {
@@ -2040,25 +2049,77 @@ function sheetToPages(sh, cfg) {
     });
   }
 
-  // ----- paginate -----
-  let y = newPage();
-  const used = [];
-  sh.groups.forEach(g => {
-    let i = 0, cont = false;
-    while (i < g.rows.length) {
-      if (y + GRP_H + ROW_H > BODY_BOTTOM) { y = newPage(); }
-      let n = 0, h = GRP_H;
-      while (i + n < g.rows.length && y + h + ROW_H <= BODY_BOTTOM) { n++; h += ROW_H; }
-      if (!n) n = 1;
-      y = drawSegment(y, g, g.rows.slice(i, i + n), cont);
-      i += n; cont = true;
+  // ----- paginate: tránh "dòng mồ côi" -----
+  // Quy tắc: (1) trang cuối không được chỉ còn dưới 2 dòng người (kể cả khi chỉ còn dòng Tổng cộng);
+  // (2) một nhóm bị tách trang thì mỗi phần phải có ít nhất 2 dòng.
+  // Cách xử lý: ưu tiên ép đều chiều cao dòng (tối thiểu ROW_MIN) để dồn vừa vào ít trang hơn; không được thì kéo thêm dòng cuối của trang trước sang trang sau.
+  const segHeight = (g, from, to, rh0, gh) => {
+    let nO = 0, nF = 0;
+    for (let k = from; k < to; k++) { if (isForeman(g.rows[k].w)) nF++; else nO++; }
+    return gh + (nO ? Math.max(nO * rh0, jobLines(g).length * 4.3 + 2) : 0) + nF * rh0;
+  };
+  const rowsOf = pg => pg.segs.reduce((a, sg) => a + sg.to - sg.from, 0);
+  function plan(rh0, tailLast) {
+    const gh = Math.max(GRP_MIN, GRP_H * rh0 / ROW_H);
+    const pgs = [{ segs: [] }];
+    let y = BODY_TOP;
+    const fresh = () => { pgs.push({ segs: [] }); y = BODY_TOP; };
+    sh.groups.forEach((g, gi) => {
+      const minTail = gi === sh.groups.length - 1 ? tailLast : 2;
+      let i = 0, cont = false;
+      while (i < g.rows.length) {
+        const rem = g.rows.length - i;
+        let fit = 0;
+        while (fit < rem && y + segHeight(g, i, i + fit + 1, rh0, gh) <= BODY_BOTTOM) fit++;
+        let n = fit;
+        if (n < rem) {                                            // nhóm phải tách sang trang sau
+          if (rem - n < minTail) n = rem - minTail;               // phần đuôi không được chỉ còn 1 dòng: kéo thêm dòng từ phần đầu
+          if (n < 2 && y > BODY_TOP) { fresh(); continue; }       // phần đầu chỉ còn 0-1 dòng ở cuối trang: cả nhóm xuống trang mới
+          if (n < 1) n = Math.max(1, fit);
+        }
+        pgs[pgs.length - 1].segs.push({ gi, from: i, to: i + n, cont });
+        y += segHeight(g, i, i + n, rh0, gh); i += n; cont = true;
+      }
+    });
+    if (y + rh0 > BODY_BOTTOM) fresh();                           // dòng Tổng cộng không còn chỗ
+    return { pgs, rh0, gh, y };
+  }
+  const lastRows = pl => rowsOf(pl.pgs[pl.pgs.length - 1]);
+  const orphan = pl => pl.pgs.length > 1 && lastRows(pl) < 2;
+  function pushToLast(pl) {                                       // kéo dòng cuối của trang trước sang trang cuối cho đủ 2 dòng
+    const pgs = pl.pgs;
+    while (pgs.length > 1 && rowsOf(pgs[pgs.length - 1]) < 2) {
+      const prev = pgs[pgs.length - 2], last = pgs[pgs.length - 1];
+      if (!prev.segs.length) { pgs.splice(pgs.length - 2, 1); continue; }
+      const sg = prev.segs[prev.segs.length - 1];
+      let mv;
+      if (sg.to - sg.from >= 3) { sg.to--; mv = { gi: sg.gi, from: sg.to, to: sg.to + 1, cont: true }; }
+      else { prev.segs.pop(); mv = sg; }
+      const nx = last.segs[0];
+      if (nx && nx.gi === mv.gi && nx.from === mv.to) { nx.from = mv.from; nx.cont = mv.cont; } else last.segs.unshift(mv);
     }
-    used.push(g);
+  }
+  let PL = plan(ROW_H, 1);
+  if (orphan(PL)) {
+    let best = null;
+    for (let h = ROW_H - 0.1; h >= ROW_MIN - 1e-6; h -= 0.1) {
+      const c = plan(h, 1);
+      if (c.pgs.length < PL.pgs.length && !orphan(c)) { best = c; break; }
+    }
+    if (best) PL = best;
+    else { PL = plan(ROW_H, 2); pushToLast(PL); }
+  }
+  let endY = BODY_TOP;
+  PL.pgs.forEach((pg, pi) => {
+    let y = newPage();
+    pg.segs.forEach(sg => { const g = sh.groups[sg.gi]; y = drawSegment(y, g, g.rows.slice(sg.from, sg.to), sg.cont, PL.rh0, PL.gh); });
+    if (pi === PL.pgs.length - 1) {
+      y = drawTotals(y, sh.groups, PL.rh0);
+      const blanks = Math.min(5, Math.max(0, Math.floor((BODY_BOTTOM - y) / PL.rh0)));
+      if (blanks) y = drawBlank(y, blanks, 'Bổ sung:', PL.rh0);
+      endY = y;
+    }
   });
-  if (y + ROW_H > BODY_BOTTOM) y = newPage();
-  y = drawTotals(y, sh.groups);
-  const blanks = Math.min(5, Math.max(0, Math.floor((BODY_BOTTOM - y) / ROW_H)));
-  if (blanks) y = drawBlank(y, blanks, 'Bổ sung:');
   drawSignatures();
   // footer on every page of this sheet
   const total = pages.length;
@@ -2066,7 +2127,7 @@ function sheetToPages(sh, cfg) {
     pg.push({ t: 'text', x: 10, y: FOOT_Y, s: cfg.formCode || '', size: 8, f: 'r', a: 'l' });
     pg.push({ t: 'text', x: 287, y: FOOT_Y, s: `Trang ${i + 1}/${total}`, size: 8, f: 'r', a: 'r' });
   });
-  return pages.map((ops, i) => ({ ops, meta: { date: sh.date, tower: T, i: i + 1, n: total } }));
+  return pages.map((ops, i) => ({ ops, meta: { date: sh.date, tower: T, i: i + 1, n: total, rows: rowsOf(PL.pgs[i]), rh: Math.round(PL.rh0 * 100) / 100, endY } }));
 }
 
 function buildPrintPages(from, to, towers) {
@@ -3564,6 +3625,257 @@ async function repRender(d) {
 }
 const repBlob = cv => new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('toBlob')), 'image/png'));
 
+/* ================= danh sách tùy chọn: chọn từng người, chọn cột, xem trước, tải PDF hoặc Excel ================= */
+// k: mã cột · t: tiêu đề · w: bề rộng trên PDF (mm) · ex: bề rộng trên Excel · al: căn lề · priv: chỉ người có quyền xem thông tin cá nhân
+const CL_COLS = [
+  { k: 'name', t: 'Họ và tên', w: 50, ex: 28, al: 'l', fixed: 1, get: w => w.name || '' },
+  { k: 'gender', t: 'Nam/Nữ', w: 14, ex: 8, al: 'c', get: w => (w.gender === 'Nữ' ? 'Nữ' : 'Nam') },
+  { k: 'role', t: 'Chức vụ', w: 17, ex: 10, al: 'c', get: w => posLabel(w) },
+  { k: 'dob', t: 'Ngày sinh', w: 24, ex: 13, al: 'c', priv: 1, date: 1, get: w => w.dob || '' },
+  { k: 'cccd', t: 'Số CCCD', w: 33, ex: 16, al: 'c', priv: 1, get: w => w.cccd || '' },
+  { k: 'phone', t: 'Số điện thoại', w: 28, ex: 14, al: 'c', priv: 1, get: w => w.phone || '' },
+  { k: 'hokhau', t: 'Hộ khẩu thường trú', w: 62, ex: 42, al: 'l', priv: 1, get: w => w.hokhau || '' },
+  { k: 'team', t: 'Tổ thường làm', w: 26, ex: 14, al: 'c', get: w => w.team || '' },
+  { k: 'unit', t: 'Nhà thầu mặc định', w: 38, ex: 24, al: 'l', get: w => (w.unit && S.units[w.unit] ? fullName(S.units[w.unit]) : '') },
+  { k: 'start', t: 'Vào dự án', w: 24, ex: 13, al: 'c', date: 1, get: w => w.start || '' },
+  { k: 'note', t: 'Ghi chú hồ sơ', w: 44, ex: 28, al: 'l', priv: 1, get: w => w.note || '' },
+  { k: 'sign', t: 'Ký tên', w: 34, ex: 16, al: 'c', blank: 1, get: () => '' },
+  { k: 'free', t: 'Ghi chú', w: 40, ex: 22, al: 'l', blank: 1, get: () => '' }
+];
+const clNorm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+const clGiven = w => String((w && w.name) || '').trim().split(/\s+/).pop() || '';      // tên gọi (từ cuối) để xếp A → Z theo kiểu Việt Nam
+const clAvail = () => CL_COLS.filter(c => !c.priv || S.canPrivate);
+const clDefCols = () => (S.canPrivate ? ['gender', 'dob', 'cccd', 'phone'] : ['gender', 'role', 'team']);
+const clSelCols = d => clAvail().filter(c => c.fixed || d.cols.has(c.k));
+const clWorkers = () => { const ws = workerList(); return [...ws.filter(w => !isLeft(w)), ...ws.filter(w => isLeft(w))]; };   // người đang làm trước, người đã nghỉ sau
+
+/** những người được chọn, theo thứ tự đã chọn trong hộp thoại */
+function clPeople(d) {
+  const ws = d.sel.map(id => S.workers[id]).filter(Boolean);
+  if (d.order === 'name') return ws.slice().sort((a, b) => clGiven(a).localeCompare(clGiven(b), 'vi') || String(a.name).localeCompare(String(b.name), 'vi'));
+  if (d.order === 'list') { const rk = new Map(workerList().map((w, i) => [w.id, i])); return ws.slice().sort((a, b) => rk.get(a.id) - rk.get(b.id)); }
+  return ws;                                                                          // 'pick': đúng thứ tự bấm chọn
+}
+const clVal = (c, w) => { const v = c.get(w); return c.date ? (v ? dmy(v) : '') : String(v == null ? '' : v); };
+
+/* ---------- PDF: bố cục trang ---------- */
+function clPages(d) {
+  const ppl = clPeople(d), cols = clSelCols(d), cfg = S.settings;
+  const sw = 10 + cols.reduce((a, c) => a + c.w, 0);
+  const land = sw > 186, W = land ? 297 : 210, H = land ? 210 : 297, X0 = 12, UW = W - 2 * X0, k = UW / sw;
+  const cw = [10 * k, ...cols.map(c => c.w * k)], nC = cw.length;
+  const cx = cw.reduce((a, w) => { a.push(a[a.length - 1] + w); return a; }, [X0]);
+  const SZ = 10, LH = 4.3, HDR_H = 9.5, bottom = H - 14, tyN = 15, RH0 = 7.4, RH_MIN = 6.2;
+  const title = String(d.title || '').trim() || 'DANH SÁCH';
+  const subLines = d.sub.trim() ? wrapText(d.sub.trim(), UW, 11, 'r').slice(0, 2) : [];
+  const ty1 = 45 + subLines.length * 5.6;
+  const tailH = 8 + (d.sign ? 40 : 0);
+
+  // văn bản từng ô, tối đa 3 dòng
+  const cell = ppl.map(w => cols.map((c, j) => {
+    const t = clVal(c, w), maxW = cw[j + 1] - 2.6;
+    if (!t) return [];
+    let ls = wrapText(t, maxW, SZ, 'r');
+    if (ls.length > 3) ls = [ls[0], ls[1], fitText(ls.slice(2).join(' '), maxW, SZ, 'r')];
+    return ls;
+  }));
+  const need = cell.map(r => Math.max(1, ...r.map(ls => ls.length)) * LH + 2.6);
+
+  // phân trang: ưu tiên ép đều chiều cao dòng; không được thì kéo dòng cuối của trang trước sang trang sau, để trang cuối không bao giờ chỉ còn 1 dòng
+  const plan = rh => {
+    const pgs = [{ rows: [], y: ty1 + HDR_H }];
+    ppl.forEach((_, i) => {
+      const h = Math.max(rh, need[i]);
+      let pg = pgs[pgs.length - 1];
+      if (pg.y + h > bottom) { pgs.push({ rows: [], y: tyN + HDR_H }); pg = pgs[pgs.length - 1]; }
+      pg.rows.push(i); pg.y += h;
+    });
+    if (pgs[pgs.length - 1].y + tailH > bottom) pgs.push({ rows: [], y: tyN + HDR_H });      // dòng Tổng cộng và ô ký không còn chỗ
+    return pgs;
+  };
+  const orphan = pgs => pgs.length > 1 && pgs[pgs.length - 1].rows.length < 2;
+  let rh = RH0, pgs = plan(rh);
+  if (orphan(pgs)) {
+    let best = null;
+    for (let h = RH0 - 0.2; h >= RH_MIN - 1e-6; h -= 0.2) { const c = plan(h); if (c.length < pgs.length && !orphan(c)) { best = { h, c }; break; } }
+    if (best) { rh = best.h; pgs = best.c; }
+    else while (pgs.length > 1 && pgs[pgs.length - 1].rows.length < 2) {
+      const prev = pgs[pgs.length - 2], last = pgs[pgs.length - 1];
+      if (!prev.rows.length) { pgs.splice(pgs.length - 2, 1); continue; }
+      last.rows.unshift(prev.rows.pop());
+    }
+  }
+
+  const out = [];
+  pgs.forEach((pg, pi) => {
+    const P = [];
+    const text = (x, y, s, size, f = 'r', a = 'l') => { if (s) P.push({ t: 'text', x, y, s, size, f, a }); };
+    const line = (x1, y1, x2, y2, lw = 0.2) => P.push({ t: 'line', x1, y1, x2, y2, lw });
+    let y;
+    if (pi === 0) {
+      P.push({ t: 'img', x: X0, y: 7.5, w: 62, h: 62 * 0.2630 });
+      text(W / 2, 36, fitText(title, UW, 15.5, 'b'), 15.5, 'b', 'c');
+      subLines.forEach((l, i) => text(W / 2, 42.8 + i * 5.6, l, 11, 'r', 'c'));
+      y = ty1;
+    } else y = tyN;
+    // dòng tiêu đề cột
+    P.push({ t: 'rect', x: X0, y, w: UW, h: HDR_H, lw: 0.35, fill: 0.92 });
+    for (let j = 1; j < nC; j++) line(cx[j], y, cx[j], y + HDR_H, 0.25);
+    ['STT', ...cols.map(c => c.t)].forEach((t, j) => {
+      const ls = wrapText(t, cw[j] - 1.6, 9.5, 'b').slice(0, 2), top = y + (HDR_H - ls.length * 4) / 2 + 3;
+      ls.forEach((l, i) => text(cx[j] + cw[j] / 2, top + i * 4, l, 9.5, 'b', 'c'));
+    });
+    y += HDR_H;
+    pg.rows.forEach((i, ri) => {
+      const h = Math.max(rh, need[i]), last = pi === pgs.length - 1 && ri === pg.rows.length - 1;
+      for (let j = 0; j <= nC; j++) line(cx[j], y, cx[j], y + h, j === 0 || j === nC ? 0.35 : 0.2);
+      line(X0, y + h, X0 + UW, y + h, last ? 0.35 : 0.2);
+      text(cx[0] + cw[0] / 2, y + h / 2 + SZ * PT * 0.33, String(i + 1), SZ, 'r', 'c');
+      cols.forEach((c, j) => {
+        const ls = cell[i][j]; if (!ls.length) return;
+        const top = y + (h - ls.length * LH) / 2 + 3.05;
+        ls.forEach((l, q) => text(c.al === 'c' ? cx[j + 1] + cw[j + 1] / 2 : cx[j + 1] + 1.4, top + q * LH, l, SZ, 'r', c.al === 'c' ? 'c' : 'l'));
+      });
+      y += h;
+    });
+    if (pi === pgs.length - 1) {
+      text(X0, y + 6.4, `Tổng cộng: ${ppl.length} người`, 10.5, 'b');
+      if (d.sign) {
+        const sx = W - X0 - 46, sy = y + 14;
+        text(sx, sy, '…, Ngày … tháng … năm …', 9.5, 'r', 'c');
+        text(sx, sy + 6, 'Người lập danh sách', 11, 'b', 'c');
+        text(sx, sy + 11, '(Ký, ghi rõ họ tên)', 9.5, 'r', 'c');
+        if (cfg.signer) text(sx, sy + 33, fitText(cfg.signer, 80, 10, 'b'), 10, 'b', 'c');
+      }
+    }
+    text(W - X0, H - 7, `Trang ${pi + 1}/${pgs.length}`, 8, 'r', 'r');
+    out.push({ ops: P, w: W, h: H, meta: { name: title, i: pi + 1, n: pgs.length, rows: pg.rows.length, rh: Math.round(rh * 100) / 100 } });
+  });
+  return out;
+}
+
+/* ---------- Excel ---------- */
+function buildListXlsx(d) {
+  const bk = new XBook(), ppl = clPeople(d), cols = clSelCols(d), LC = cols.length + 1;
+  const title = String(d.title || '').trim() || 'DANH SÁCH';
+  bk.title = title;
+  const s = {
+    title: bk.style({ font: { sz: 16, b: 1 }, h: 'center', v: 'center' }),
+    sub: bk.style({ font: { sz: 12 }, h: 'center', v: 'center' }),
+    hdr: bk.style({ font: { sz: 11, b: 1 }, fill: 'DCE6F1', bd: 'thin', h: 'center', v: 'center', wrap: 1 }),
+    c: bk.style({ bd: 'thin', h: 'center', v: 'center', wrap: 1 }),
+    l: bk.style({ bd: 'thin', h: 'left', v: 'center', wrap: 1 }),
+    d: bk.style({ bd: 'thin', h: 'center', v: 'center', nf: 'dd/mm/yyyy' }),
+    tl: bk.style({ font: { sz: 12, b: 1 }, h: 'left', v: 'center' })
+  };
+  const sh = bk.sheet('Danh sách', { zoom: 90 });
+  sh.col(1, 1, 6); cols.forEach((c, i) => sh.col(i + 2, i + 2, c.ex));
+  sh.merge(1, 1, 1, LC, title, s.title); sh.height(1, 32);
+  let r = 2;
+  if (d.sub.trim()) { sh.merge(2, 1, 2, LC, d.sub.trim(), s.sub); sh.height(2, 20); r = 3; }
+  sh.merge(r, 1, r, LC, `Tổng: ${ppl.length} người`, s.tl); sh.height(r, 20); r++;
+  const hr = r;
+  sh.set(hr, 1, 'TT', { s: s.hdr }); cols.forEach((c, i) => sh.set(hr, i + 2, c.t, { s: s.hdr })); sh.height(hr, 30);
+  ppl.forEach((w, i) => {
+    const rr = hr + 1 + i;
+    sh.set(rr, 1, i + 1, { s: s.c });
+    cols.forEach((c, j) => {
+      const v = c.get(w);
+      if (c.date && v) sh.set(rr, j + 2, xlDate(v), { s: s.d });
+      else sh.set(rr, j + 2, v === '' || v == null ? null : String(v), { s: c.al === 'l' ? s.l : s.c });      // CCCD, số điện thoại giữ dạng chữ để không mất số 0 đầu
+    });
+    sh.height(rr, 22);
+  });
+  sh.freeze = { rows: hr, cols: 2 }; sh.page = { paper: 9, orient: cols.length > 4 ? 'landscape' : 'portrait', fitH: 0 };
+  return bk.build();
+}
+
+/* ---------- hộp thoại ---------- */
+const clFileName = ext => `DanhSach_${today}.${ext}`;
+function clSync() {
+  const d = S.dlg; if (!d || d.type !== 'cl' || d.step !== 'setup') return;
+  const t = $('#cl-title'), s = $('#cl-sub'), o = $('#cl-order'), g = $('#cl-sign');
+  if (t) d.title = t.value; if (s) d.sub = s.value; if (o) d.order = o.value; if (g) d.sign = g.checked;
+}
+function clCheck(d) {
+  clSync();
+  if (!d.sel.length) { const e = $('#cl-err'); if (e) e.textContent = 'Chọn ít nhất một người.'; return false; }
+  S.clMem = { title: d.title, sub: d.sub, cols: [...d.cols], order: d.order, sign: d.sign };
+  return true;
+}
+A['cl-open'] = () => {
+  const m = S.clMem || {};
+  S.dlg = { type: 'cl', step: 'setup', sel: [], q: '', title: m.title || 'DANH SÁCH NHÂN SỰ', sub: m.sub != null ? m.sub : (S.settings.projectFull ? 'Dự án: ' + S.settings.projectFull : ''), cols: new Set(m.cols || clDefCols()), order: m.order || 'list', sign: m.sign !== false, idx: 0 };
+  renderDlg(true);
+};
+DLG.cl = () => {
+  const d = S.dlg;
+  if (d.step === 'preview') {
+    const pg = d.pages[d.idx];
+    const body = `<div class="pvnav"><button type="button" class="ib" data-act="cl-go" data-d="-1"${d.idx <= 0 ? ' disabled' : ''} aria-label="Trang trước">‹</button><span>Trang ${d.idx + 1}/${d.pages.length} · <b>${d.n} người</b></span><button type="button" class="ib" data-act="cl-go" data-d="1"${d.idx >= d.pages.length - 1 ? ' disabled' : ''} aria-label="Trang sau">›</button></div><div class="pv${pg.w < pg.h ? ' por' : ''}">${pageToSvg(pg.ops, pg.w, pg.h)}</div>`;
+    return shell('wide', 'Xem trước danh sách', body, `<button type="button" class="btn" data-act="cl-back">Sửa lại</button><button type="button" class="btn" data-act="cl-xlsx">Tải Excel</button><button type="button" class="btn pri" data-act="cl-pdf">Tải PDF để in</button>`);
+  }
+  const ws = clWorkers(), q = clNorm(d.q), sel = new Set(d.sel);
+  const act = ws.filter(w => !isLeft(w));
+  const teams = [...new Set(act.filter(w => w.team).map(w => w.team))];
+  const units = [...new Set(act.filter(w => w.unit && S.units[w.unit]).map(w => w.unit))];
+  const chip = (t, v, label, n) => `<button type="button" class="tg" data-act="cl-grp" data-t="${t}" data-v="${esc(v)}">${esc(label)} <small>(${n})</small></button>`;
+  const chips = teams.map(t => chip('team', t, 'Tổ ' + t, act.filter(w => w.team === t).length)).join('') + units.map(u => chip('unit', u, S.units[u].name, act.filter(w => w.unit === u).length)).join('');
+  const list = ws.map(w => `<label class="chk${q && !clNorm(w.name).includes(q) ? ' clh' : ''}" data-n="${esc(clNorm(w.name))}"><input type="checkbox" data-chg="cl-w" data-id="${esc(w.id)}"${sel.has(w.id) ? ' checked' : ''}> <span>${esc(w.name)}${isLeft(w) ? ' <small>· đã nghỉ</small>' : w.team ? ` <small>· ${esc(w.team)}</small>` : ''}</span></label>`).join('');
+  const cols = clAvail().filter(c => !c.fixed).map(c => `<label class="chk"><input type="checkbox" data-chg="cl-col" data-k="${c.k}"${d.cols.has(c.k) ? ' checked' : ''}> <span>${esc(c.blank ? c.t + ' (để trống)' : c.t)}</span></label>`).join('');
+  const opt = (v, t) => `<option value="${v}"${d.order === v ? ' selected' : ''}>${t}</option>`;
+  return shell('', 'Lập danh sách tùy chọn', `
+    <div class="frm">
+      <label>Tiêu đề<input id="cl-title" data-chg="cl-text" value="${esc(d.title)}" autocomplete="off"></label>
+      <label>Dòng ghi chú dưới tiêu đề (không bắt buộc)<input id="cl-sub" data-chg="cl-text" value="${esc(d.sub)}" autocomplete="off" placeholder="Ví dụ: Đăng ký ra vào công trình ngày ${dmy(today)}"></label>
+      <fieldset class="chks people"><legend>Chọn người (đã chọn ${d.sel.length}/${ws.length})</legend>
+        <input type="search" id="cl-q" class="clq" placeholder="Gõ tên để tìm nhanh…" value="${esc(d.q)}" autocomplete="off">
+        <div class="pbtn"><button type="button" class="lnk" data-act="cl-all">Chọn tất cả đang hiện</button><button type="button" class="lnk" data-act="cl-none">Bỏ chọn hết</button></div>
+        ${chips ? `<div class="rngchips clchips"><span class="muted">Chọn nhanh cả nhóm (người đang làm):</span>${chips}</div>` : ''}
+        <div class="plist" id="cl-list">${list || '<p class="muted">Chưa có ai trong danh sách nhân sự.</p>'}</div></fieldset>
+      <fieldset class="chks people"><legend>Cột trong danh sách (họ tên luôn có)</legend><div class="plist clcols">${cols}</div></fieldset>
+      <div class="two"><label>Thứ tự<select id="cl-order" data-chg="cl-text">${opt('list', 'Như trong Danh sách nhân sự')}${opt('name', 'Theo tên A → Z')}${opt('pick', 'Theo thứ tự tôi bấm chọn')}</select></label>
+      <label class="chk"><input type="checkbox" id="cl-sign" data-chg="cl-text"${d.sign ? ' checked' : ''}> <span>Có ô ký người lập (trên bản PDF)</span></label></div>
+      <p class="err" id="cl-err" role="alert"></p>
+    </div>`, `<button type="button" class="btn" data-act="dlg-close">Hủy</button><button type="button" class="btn" data-act="cl-xlsx">Tải Excel</button><button type="button" class="btn pri" data-act="cl-prev">Xem trước PDF</button>`);
+};
+C['cl-text'] = () => clSync();
+C['cl-w'] = el => { const d = S.dlg, id = el.dataset.id, i = d.sel.indexOf(id); clSync(); if (el.checked) { if (i < 0) d.sel.push(id); } else if (i >= 0) d.sel.splice(i, 1); renderDlg(); };
+C['cl-col'] = el => { const d = S.dlg; clSync(); if (el.checked) d.cols.add(el.dataset.k); else d.cols.delete(el.dataset.k); renderDlg(); };
+A['cl-all'] = () => { const d = S.dlg; clSync(); [...document.querySelectorAll('#cl-list label:not(.clh) input')].forEach(x => { if (!d.sel.includes(x.dataset.id)) d.sel.push(x.dataset.id); }); renderDlg(); };
+A['cl-none'] = () => { const d = S.dlg; clSync(); d.sel = []; renderDlg(); };
+A['cl-grp'] = el => {
+  const d = S.dlg, t = el.dataset.t, v = el.dataset.v; clSync();
+  const ids = clWorkers().filter(w => !isLeft(w) && (t === 'team' ? w.team === v : w.unit === v)).map(w => w.id);
+  if (ids.every(id => d.sel.includes(id))) d.sel = d.sel.filter(id => !ids.includes(id)); else ids.forEach(id => { if (!d.sel.includes(id)) d.sel.push(id); });
+  renderDlg();
+};
+if (typeof document !== 'undefined') document.addEventListener('input', e => {          // tìm theo tên: ẩn/hiện ngay, không vẽ lại hộp thoại
+  const el = e.target;
+  if (!el || el.id !== 'cl-q' || !S.dlg || S.dlg.type !== 'cl') return;
+  S.dlg.q = el.value;
+  const q = clNorm(el.value);
+  document.querySelectorAll('#cl-list label').forEach(l => l.classList.toggle('clh', !!q && !(l.dataset.n || '').includes(q)));
+});
+A['cl-prev'] = () => {
+  const d = S.dlg; if (!clCheck(d)) return;
+  d.pages = clPages(d); d.n = d.sel.length; d.step = 'preview'; d.idx = 0; renderDlg(true);
+};
+A['cl-back'] = () => { S.dlg.step = 'setup'; renderDlg(true); };
+A['cl-go'] = el => { const d = S.dlg; d.idx = clamp(d.idx + (+el.dataset.d), 0, d.pages.length - 1); renderDlg(); };
+A['cl-pdf'] = async () => {
+  const d = S.dlg; if (!d.pages || !d.pages.length) return;
+  const name = clFileName('pdf');
+  try { const st = await saveFile(name, pdfFromPages(d.pages)); toast(st === 'delivered' ? 'Đã gửi file PDF.' : `Đã lưu ${name}.`); }
+  catch (e) { toast(e && e.code === 'declined' ? 'Đã hủy, chưa lưu file.' : 'Không tải được file PDF từ đây. Thử mở trang này trong trình duyệt khác.'); }
+};
+A['cl-xlsx'] = async () => {
+  const d = S.dlg; if (!clCheck(d)) return;
+  const name = clFileName('xlsx');
+  try { const st = await saveFile(name, buildListXlsx(d)); toast(st === 'delivered' ? 'Đã gửi file Excel.' : `Đã lưu ${name}.`); }
+  catch (e) { toast(e && e.code === 'declined' ? 'Đã hủy, chưa lưu file.' : 'Không tải được file từ đây. Thử mở trang này trong trình duyệt khác.'); }
+};
+
 /* ================= UI ================= */
 const TABS = { nhap: ['Nhập chấm công','Nhập'], thang: ['Bảng công tháng','Tháng'], nhathau: ['Theo nhà thầu','Nhà thầu'], danhsach: ['Danh sách','Danh sách'], chuyencan: ['Chuyên cần','Chuyên cần'], caidat: ['Cài đặt','Cài đặt'], gopy: ['Góp ý','Góp ý'], taikhoan: ['Tài khoản','Tài khoản'] };
 function tabKeys() {
@@ -4550,7 +4862,7 @@ function viewManage() {
   return `
   <section class="panel"><div class="ph"><h3>Đơn vị sử dụng nhân công</h3><button type="button" class="btn pri sm" data-act="add-unit"${ro ? ' disabled' : ''}>+ Thêm đơn vị</button></div>
     <div class="tscroll"><table class="lt"><thead><tr><th>Mã</th><th>Tên đơn vị / Nhà thầu</th><th>Loại</th><th>Tháp</th><th>Trạng thái</th><th></th></tr></thead><tbody>${us}</tbody></table></div></section>
-  <section class="panel"><div class="ph"><h3>Nhân sự ${esc(st.teamName || 'Team')}</h3><span class="muted grow">Toàn bộ do ${esc(st.signer || 'bạn')} quản lý hành chính và chấm công. Tổ và nhà thầu mặc định chỉ là nơi thường làm; mỗi ngày có thể gán sang bất kỳ nhà thầu nào, kể cả nhiều nhà thầu trong ngày. Người đã nghỉ không hiện ở màn hình chấm công.</span><button type="button" class="btn pri sm" data-act="add-worker"${ro ? ' disabled' : ''}>+ Thêm người</button></div>
+  <section class="panel"><div class="ph"><h3>Nhân sự ${esc(st.teamName || 'Team')}</h3><span class="muted grow">Toàn bộ do ${esc(st.signer || 'bạn')} quản lý hành chính và chấm công. Tổ và nhà thầu mặc định chỉ là nơi thường làm; mỗi ngày có thể gán sang bất kỳ nhà thầu nào, kể cả nhiều nhà thầu trong ngày. Người đã nghỉ không hiện ở màn hình chấm công.</span><button type="button" class="btn sm" data-act="cl-open">Lập danh sách…</button><button type="button" class="btn pri sm" data-act="add-worker"${ro ? ' disabled' : ''}>+ Thêm người</button></div>
     <div class="wfil">${wchips}${nUnk ? `<span class="warnx">${nUnk} người đã nghỉ chưa có ngày rời dự án: bấm Sửa để nhập.</span>` : ''}</div>
     <div class="tscroll"><table class="lt"><thead><tr><th>#</th><th>Họ tên</th><th>Chức vụ</th><th>Tổ thường làm</th><th>Nhà thầu mặc định</th><th>Vào dự án</th><th>Trạng thái</th><th></th></tr></thead><tbody>${ws}</tbody></table></div></section>
   ${rep}
