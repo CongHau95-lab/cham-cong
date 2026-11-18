@@ -1,8 +1,8 @@
 {
   "name": "cham-cong-diamond-sky",
-  "productName": "Chấm công Diamond Sky",
+  "productName": "Chấm công Đại Nhật",
   "version": "1.0.0",
-  "description": "Phần mềm chấm công Diamond Sky - Central",
+  "description": "Phần mềm chấm công Đại Nhật Block A, Block B - Central",
   "author": "Nguyễn Công Hậu",
   "private": true,
   "main": "electron/main.js",
@@ -25,7 +25,7 @@
   },
   "build": {
     "appId": "vn.central.chamcong",
-    "productName": "Chấm công Diamond Sky",
+    "productName": "Chấm công Đại Nhật",
     "files": ["web/**", "electron/**", "package.json"],
     "icon": "web/icon-512.png",
     "win": { "target": "nsis" },

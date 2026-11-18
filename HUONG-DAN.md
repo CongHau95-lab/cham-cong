@@ -1,4 +1,4 @@
-# Chấm công Diamond Sky: hướng dẫn đưa app lên máy tính và điện thoại
+# Chấm công Đại Nhật: hướng dẫn đưa app lên máy tính và điện thoại
 
 Phần mềm do **Nguyễn Công Hậu** tạo · ĐT 0964 318 104
 
@@ -115,3 +115,28 @@ Chân trang hiện **● Trực tiếp** khi kênh đang nối, **○ Định k�
 
 Lưu ý: ai đã đăng nhập và xác minh email đều ghi được con số này. Họ chỉ có thể làm các máy tải lại dữ liệu nhiều hơn, không đọc hay sửa được dữ liệu.
 
+
+---
+
+## 9. Lập danh sách tùy chọn và in không dòng mồ côi
+
+**Lập danh sách tùy chọn** (tab *Danh sách* → nút **Lập danh sách…**): dùng khi cần lập nhanh danh sách cho bất kỳ ai, không theo đơn vị hay tổ.
+
+1. Gõ tên vào ô tìm, bấm chọn từng người (hoặc *Chọn cả nhóm*, *Bỏ chọn hết*). Người đã nghỉ vẫn chọn được.
+2. Chọn cột cần in (họ tên luôn có; thêm giới tính, ngày sinh, CCCD, hộ khẩu, điện thoại, ô Ký tên, ô Ghi chú…). Các cột thông tin cá nhân chỉ hiện với người có quyền xem thông tin cá nhân.
+3. Đặt tiêu đề, dòng phụ, thứ tự (theo danh sách, theo tên hoặc theo thứ tự đã chọn), có hoặc không khối chữ ký.
+4. **Xem trước** → **Xuất PDF** hoặc **Xuất Excel**. App nhớ lựa chọn của lần trước.
+
+Giấy tự chuyển sang khổ ngang khi nhiều cột; tiêu đề cột lặp lại ở mỗi trang.
+
+**Không còn dòng mồ côi** (ở bảng xác nhận công nhật và danh sách tùy chọn): nếu trang cuối chỉ còn 1 dòng, app thu nhẹ chiều cao các dòng ở trên cho vừa; nếu vẫn không đủ, đẩy thêm 1 dòng cuối của trang trước sang trang sau để trang sau luôn có ít nhất 2 dòng.
+
+## 10. Điểm chuyên cần: nghỉ có lý do chính đáng được miễn trừ
+
+Tab *Chuyên cần*, tiêu chí **Đi làm đủ ngày** (10 − 2 × số ngày nghỉ):
+
+- Buổi nghỉ mà **ghi chú ngày đó** có lý do chính đáng (khám sức khỏe, làm hồ sơ, làm giấy tờ, làm thủ tục, lý do chính đáng…) thì **không bị trừ điểm**. Bảng hiện dòng xanh *Miễn trừ* ghi rõ ngày và ghi chú.
+- **Vẫn bị trừ:** nghỉ ốm, vắng không phép, và mọi lý do không nằm trong danh sách (kể cả không ghi lý do). Ghi chú có "ốm", "không phép" hoặc "tự ý" luôn bị trừ, dù có thêm cụm từ chính đáng. Ghi "không có lý do chính đáng" hoặc "không khám sức khỏe" cũng bị trừ.
+- Danh sách lý do chính đáng sửa được ở **Cài đặt → Chuyên cần và kỷ luật** (cách nhau bằng dấu phẩy, không phân biệt hoa thường và dấu).
+- Phần **kỷ luật** (cảnh cáo, mời khỏi dự án) không đổi.
+- Cách làm: khi chấm công, bấm ô nghỉ (X) rồi ghi lý do vào ô Ghi chú của ngày đó.
