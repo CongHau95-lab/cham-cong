@@ -5,7 +5,7 @@ const path = require('path');
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280, height: 860, minWidth: 380, minHeight: 600,
-    backgroundColor: '#233064', title: 'Chấm công Diamond Sky',
+    backgroundColor: '#233064', title: 'Chấm công Đại Nhật',
     icon: path.join(__dirname, '..', 'web', 'icon-512.png'),
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false }
   });
